@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ma.tkpay.naps.config.NapsConfig
 import ma.tkpay.naps.connection.NapsConnection
+import ma.tkpay.naps.gateway.GatewayNotifier
 import ma.tkpay.naps.models.*
 import ma.tkpay.naps.protocol.ReceiptParser
 import ma.tkpay.naps.protocol.TlvProtocol
@@ -67,7 +68,14 @@ class NapsPayClient(private val config: NapsConfig) {
                 ?: throw NapsError.invalidResponse("Missing response code")
 
             if (responseCode != "000") {
-                return@withContext buildFailedResult(responseCode, paymentResponse)
+                val result = buildFailedResult(responseCode, paymentResponse)
+                // Send notification to gateway
+                GatewayNotifier.notifyTransaction(
+                    terminalHost = config.host,
+                    request = request,
+                    result = result
+                )
+                return@withContext result
             }
 
             // Phase 2: Confirmation (must be on same connection, within 40 seconds)
@@ -78,7 +86,16 @@ class NapsPayClient(private val config: NapsConfig) {
             )
 
             // Build successful result
-            buildSuccessfulResult(confirmationResponse)
+            val result = buildSuccessfulResult(confirmationResponse)
+
+            // Send notification to gateway
+            GatewayNotifier.notifyTransaction(
+                terminalHost = config.host,
+                request = request,
+                result = result
+            )
+
+            result
         } finally {
             connection.disconnect()
         }
